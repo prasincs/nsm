@@ -107,8 +107,7 @@ func TestOpenSessionErrorHandling(t *testing.T) {
 		}
 		if sess == nil {
 			t.Error("expected non-nil session")
-		}
-		if sess.fd == nil {
+		} else if sess.fd == nil {
 			t.Error("expected non-nil file descriptor")
 		}
 	})
@@ -117,7 +116,7 @@ func TestOpenSessionErrorHandling(t *testing.T) {
 		// Mock the default open to avoid accessing /dev/nsm
 		originalOpen := DefaultOptions.Open
 		defer func() { DefaultOptions.Open = originalOpen }()
-		
+
 		DefaultOptions.Open = func() (FileDescriptor, error) {
 			return &mockFileDescriptor{fd: 1}, nil
 		}
@@ -425,7 +424,7 @@ func TestSendSuccessPath(t *testing.T) {
 			"module_id":     "test-module",
 		},
 	}
-	
+
 	validCBOR, err := cbor.Marshal(validResponse)
 	if err != nil {
 		t.Fatalf("failed to create test response: %v", err)
@@ -434,7 +433,7 @@ func TestSendSuccessPath(t *testing.T) {
 	sess := &Session{
 		fd: &mockFileDescriptor{fd: 1},
 		options: Options{
-			Syscall: func(trap, a1, a2, a3 uintptr) (r1, r2 uintptr, err syscall.Errno) {
+			Syscall: func(_, _, _, _ uintptr) (r1, r2 uintptr, err syscall.Errno) {
 				// Simulate successful syscall that copies response data
 				return 0, 0, 0
 			},

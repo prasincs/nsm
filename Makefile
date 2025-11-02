@@ -1,6 +1,6 @@
-.PHONY: all test lint coverage clean build
+.PHONY: all test lint coverage clean build fmt
 
-all: lint test coverage
+all: fmt lint test coverage
 
 # Build all packages
 build:
@@ -10,8 +10,13 @@ build:
 test:
 	go test -race -coverprofile=coverage.out -covermode=atomic ./...
 
-# Run linting
-lint:
+# Format code
+fmt:
+	go fmt ./...
+	go run golang.org/x/tools/cmd/goimports@latest -w .
+
+# Run linting (depends on fmt)
+lint: fmt
 	go run github.com/golangci/golangci-lint/cmd/golangci-lint@v1.61.0 run --timeout=5m
 
 # Generate and display coverage report
@@ -46,11 +51,6 @@ clean:
 	go clean -testcache
 	rm -f coverage.out coverage.html
 
-# Format code
-fmt:
-	go fmt ./...
-	go run golang.org/x/tools/cmd/goimports@latest -w .
-
 # Run all checks (CI simulation)
-ci: verify build vet lint test coverage
+ci: verify build vet fmt lint test coverage
 	@echo "✅ All CI checks passed"

@@ -20,9 +20,9 @@ const (
 	maxRequestSize  = 0x1000
 	maxResponseSize = 0x3000
 	ioctlMagic      = 0x0A
-	
+
 	// Error messages
-	errGetRandomNoBytes  = "GetRandom response did not include random bytes"
+	errGetRandomNoBytes   = "GetRandom response did not include random bytes"
 	errGetRandomFailedFmt = "GetRandom failed with error code %v"
 )
 
@@ -194,20 +194,20 @@ func (sess *Session) Close() error {
 	}
 
 	var err error
-	
+
 	// Always clear the session state to prevent reuse, even on panic
 	defer func() {
 		sess.fd = nil
 		sess.reqpool = nil
 		sess.respool = nil
 	}()
-	
+
 	// Close the file descriptor
 	err = sess.fd.Close()
 	return err
 }
 
-// Send an NSM request to the device and await its response. 
+// Send an NSM request to the device and await its response.
 // IOCTL operations are synchronous and expensive - each call blocks and
 // context-switches to the Nitro hypervisor. Use sparingly.
 // Safe to call from multiple goroutines, but not while Close-ing.
@@ -247,7 +247,7 @@ func (sess *Session) Send(req request.Request) (response.Response, error) {
 		sess.respool.Put(resbRaw)
 		return response.Response{}, fmt.Errorf("pool returned unexpected type %T", resbRaw)
 	}
-	defer sess.respool.Put(resb)
+	defer sess.respool.Put(resbRaw)
 
 	return sess.sendMarshaled(reqb, resb)
 }
@@ -314,7 +314,7 @@ func (sess *Session) Read(into []byte) (int, error) {
 		sess.respool.Put(resbRaw)
 		return 0, fmt.Errorf("pool returned unexpected type %T", resbRaw)
 	}
-	defer sess.respool.Put(resb)
+	defer sess.respool.Put(resbRaw)
 
 	for i := 0; i < len(into); {
 		res, err := sess.sendMarshaled(reqb, resb)

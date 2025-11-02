@@ -4,9 +4,10 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"time"
+
 	"github.com/hf/nsm"
 	"github.com/hf/nsm/request"
-	"time"
 )
 
 func attest(nonce, userData, publicKey []byte) ([]byte, error) {
