@@ -20,6 +20,15 @@ const (
 	maxRequestSize  = 0x1000
 	maxResponseSize = 0x3000
 	ioctlMagic      = 0x0A
+	
+	// Error messages
+	errGetRandomNoBytes  = "GetRandom response did not include random bytes"
+	errGetRandomFailedFmt = "GetRandom failed with error code %v"
+)
+
+var (
+	// ErrSessionClosed is returned when the session is in a closed state.
+	ErrSessionClosed = errors.New("Session is closed")
 )
 
 // FileDescriptor is a generic file descriptor interface that can be closed.
@@ -72,16 +81,11 @@ type ErrorGetRandomFailed struct {
 // Error returns the formatted string.
 func (err *ErrorGetRandomFailed) Error() string {
 	if err.ErrorCode != "" {
-		return fmt.Sprintf("GetRandom failed with error code %v", err.ErrorCode)
+		return fmt.Sprintf(errGetRandomFailedFmt, err.ErrorCode)
 	}
 
-	return "GetRandom response did not include random bytes"
+	return errGetRandomNoBytes
 }
-
-var (
-	// ErrSessionClosed is returned when the session is in a closed state.
-	ErrSessionClosed error = errors.New("Session is closed")
-)
 
 // A Session is used to interact with the NSM.
 type Session struct {
@@ -328,7 +332,7 @@ func (sess *Session) Read(into []byte) (int, error) {
 		copied := copy(into[i:], res.GetRandom.Random)
 		if copied == 0 {
 			return i, &ErrorGetRandomFailed{
-				ErrorCode: "no data received",
+				ErrorCode: errGetRandomNoBytes,
 			}
 		}
 		i += copied

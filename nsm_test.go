@@ -37,7 +37,7 @@ func TestSendEmptyBufferValidation(t *testing.T) {
 		Open: func() (FileDescriptor, error) {
 			return &mockFileDescriptor{fd: 1}, nil
 		},
-		Syscall: func(trap, a1, a2, a3 uintptr) (r1, r2 uintptr, err syscall.Errno) {
+		Syscall: func(_, _, _, _ uintptr) (r1, r2 uintptr, err syscall.Errno) {
 			return 0, 0, 0
 		},
 	}
@@ -375,7 +375,7 @@ func TestSendMarshaledValidation(t *testing.T) {
 		sess := &Session{
 			fd: &mockFileDescriptor{fd: 1},
 			options: Options{
-				Syscall: func(trap, a1, a2, a3 uintptr) (r1, r2 uintptr, err syscall.Errno) {
+				Syscall: func(_, _, _, _ uintptr) (r1, r2 uintptr, err syscall.Errno) {
 					return 0, 0, 0 // Empty response
 				},
 			},
@@ -395,7 +395,7 @@ func TestSendMarshaledValidation(t *testing.T) {
 		sess := &Session{
 			fd: &mockFileDescriptor{fd: 1},
 			options: Options{
-				Syscall: func(trap, a1, a2, a3 uintptr) (r1, r2 uintptr, err syscall.Errno) {
+				Syscall: func(_, _, _, _ uintptr) (r1, r2 uintptr, err syscall.Errno) {
 					return 0, 0, 0
 				},
 			},

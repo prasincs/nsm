@@ -1,14 +1,6 @@
-.PHONY: all test lint coverage clean build install-tools
-
-# Tool versions - pinned for reproducibility
-GOLANGCI_LINT_VERSION := v1.61.0
+.PHONY: all test lint coverage clean build
 
 all: lint test coverage
-
-# Install development tools with pinned versions
-install-tools:
-	@echo "Installing development tools..."
-	@go install github.com/golangci/golangci-lint/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION)
 
 # Build all packages
 build:
@@ -20,7 +12,7 @@ test:
 
 # Run linting
 lint:
-	golangci-lint run --timeout=5m
+	go run github.com/golangci/golangci-lint/cmd/golangci-lint@v1.61.0 run --timeout=5m
 
 # Generate and display coverage report
 coverage: test
@@ -57,7 +49,7 @@ clean:
 # Format code
 fmt:
 	go fmt ./...
-	goimports -w .
+	go run golang.org/x/tools/cmd/goimports@latest -w .
 
 # Run all checks (CI simulation)
 ci: verify build vet lint test coverage

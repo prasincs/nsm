@@ -35,19 +35,7 @@ jobs:
       run: go vet ./...
     
     - name: Test with coverage
-      run: go test -race -coverprofile=coverage.out -covermode=atomic ./...
-    
-    - name: Check coverage
-      run: |
-        go tool cover -func=coverage.out
-        COVERAGE=$(go tool cover -func=coverage.out | grep total | awk '{print $3}' | sed 's/%//')
-        echo "Total coverage: ${COVERAGE}%"
-        if (( $(echo "$COVERAGE < 60.0" | bc -l) )); then
-          echo "❌ Coverage ${COVERAGE}% is below minimum 60%"
-          exit 1
-        else
-          echo "✅ Coverage ${COVERAGE}% meets minimum threshold"
-        fi
+      run: make test coverage
 
   lint:
     name: Lint
@@ -62,9 +50,6 @@ jobs:
         go-version-file: 'go.mod'
         check-latest: true
     
-    - name: golangci-lint
-      uses: golangci/golangci-lint-action@v6
-      with:
-        version: v1.61.0  # Pin specific version
-        args: --timeout=5m
+    - name: Run lint via Makefile
+      run: make lint
 

@@ -34,7 +34,7 @@ func TestUnmarshalCBORStringResponses(t *testing.T) {
 			name:    "unknown string response",
 			input:   "UnknownResponse",
 			wantErr: true,
-			check:   func(r *Response) bool { return true },
+			check:   func(_ *Response) bool { return true },
 		},
 	}
 
