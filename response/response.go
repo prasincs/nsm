@@ -57,7 +57,7 @@ type DescribeNSM struct {
 	VersionPatch uint16   `cbor:"version_patch" json:"version_patch,omitempty"`
 	ModuleID     string   `cbor:"module_id" json:"module_id,omitempty"`
 	MaxPCRs      uint16   `cbor:"max_pcrs" json:"max_pcrs,omitempty"`
-	LockedPCRs   []uint16 `cbor:"locked_pcrs" json:"digest,omitempty"`
+	LockedPCRs   []uint16 `cbor:"locked_pcrs" json:"locked_pcrs,omitempty"`
 	Digest       Digest   `cbor:"digest" json:"digest,omitempty"`
 }
 
@@ -98,16 +98,16 @@ type mapResponse struct {
 // UnmarshalCBOR function to correctly unmarshal the CBOR encoding according to
 // Rust's cbor serde implementation.
 func (res *Response) UnmarshalCBOR(data []byte) error {
-	// One might try to question the sanity behind this decoding function.
-	// Please enjoy this: https://github.com/pyfisch/cbor/blob/2f2d0253e2d30e5ba7812cf0b149838b0c95530d/src/ser.rs#L83-L117
+	// Handle CBOR encoding compatibility with Rust's serde implementation
+	// Reference: https://github.com/pyfisch/cbor/blob/2f2d0253e2d30e5ba7812cf0b149838b0c95530d/src/ser.rs#L83-L117
 	possiblyString := ""
 
 	err := cbor.Unmarshal(data, &possiblyString)
-	if nil != err {
+	if err != nil {
 		possiblyMap := mapResponse{}
-		err := cbor.Unmarshal(data, &possiblyMap)
-		if nil != err {
-			return err
+		mapErr := cbor.Unmarshal(data, &possiblyMap)
+		if mapErr != nil {
+			return fmt.Errorf("failed to unmarshal response as string (%v) or map (%v)", err, mapErr)
 		}
 
 		res.DescribePCR = possiblyMap.DescribePCR

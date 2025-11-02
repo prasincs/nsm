@@ -71,7 +71,7 @@ type ErrorGetRandomFailed struct {
 
 // Error returns the formatted string.
 func (err *ErrorGetRandomFailed) Error() string {
-	if "" != err.ErrorCode {
+	if err.ErrorCode != "" {
 		return fmt.Sprintf("GetRandom failed with error code %v", err.ErrorCode)
 	}
 
@@ -97,6 +97,14 @@ type ioctlMessage struct {
 }
 
 func send(options Options, fd uintptr, req []byte, res []byte) ([]byte, error) {
+	// Validate slices to prevent panic on empty slices
+	if len(req) == 0 {
+		return nil, errors.New("request buffer is empty")
+	}
+	if len(res) == 0 {
+		return nil, errors.New("response buffer is empty")
+	}
+
 	iovecReq := syscall.Iovec{
 		Base: &req[0],
 	}
@@ -112,6 +120,9 @@ func send(options Options, fd uintptr, req []byte, res []byte) ([]byte, error) {
 		Response: iovecRes,
 	}
 
+	// IOCTL calls to /dev/nsm are synchronous and block until the NSM device
+	// responds. Each call performs a context switch to the Nitro hypervisor.
+	// Reference: https://github.com/aws/aws-nitro-enclaves-nsm-api
 	_, _, err := options.Syscall(
 		syscall.SYS_IOCTL,
 		fd,
@@ -119,7 +130,7 @@ func send(options Options, fd uintptr, req []byte, res []byte) ([]byte, error) {
 		uintptr(unsafe.Pointer(&msg)),
 	)
 
-	if 0 != err {
+	if err != 0 {
 		return nil, &ErrorIoctlFailed{
 			Errno: err,
 		}
@@ -130,16 +141,23 @@ func send(options Options, fd uintptr, req []byte, res []byte) ([]byte, error) {
 
 // OpenSession opens a new session with the provided options.
 func OpenSession(opts Options) (*Session, error) {
-	session := &Session{
-		options: opts,
+	// Set defaults if not provided
+	if opts.Open == nil {
+		opts.Open = DefaultOptions.Open
+	}
+	if opts.Syscall == nil {
+		opts.Syscall = DefaultOptions.Syscall
 	}
 
 	fd, err := opts.Open()
-	if nil != err {
-		return session, err
+	if err != nil {
+		return nil, err
 	}
 
-	session.fd = fd
+	session := &Session{
+		options: opts,
+		fd:      fd,
+	}
 	session.reqpool = &sync.Pool{
 		New: func() interface{} {
 			return bytes.NewBuffer(make([]byte, 0, maxRequestSize))
@@ -162,22 +180,26 @@ func OpenDefaultSession() (*Session, error) {
 // Close this session. It is not thread safe to Close while other threads are
 // Read-ing or Send-ing.
 func (sess *Session) Close() error {
-	if nil == sess.fd {
+	if sess == nil || sess.fd == nil {
 		return nil
 	}
 
 	err := sess.fd.Close()
-	sess.fd = nil
-	sess.reqpool = nil
-	sess.respool = nil
+	if err == nil {
+		// Only set to nil if close was successful
+		sess.fd = nil
+		sess.reqpool = nil
+		sess.respool = nil
+	}
 
 	return err
 }
 
-// Send an NSM request to the device and await its response. It safe to call
-// this from multiple threads that are Read-ing or Send-ing, but not Close-ing.
-// Each Send and Read call reserves at most 16KB of memory, so having multiple
-// parallel sends or reads might lead to increased memory usage.
+// Send an NSM request to the device and await its response. 
+// IOCTL operations are synchronous and expensive - each call blocks and
+// context-switches to the Nitro hypervisor. Use sparingly.
+// Safe to call from multiple goroutines, but not while Close-ing.
+// Each call reserves up to 16KB of memory.
 func (sess *Session) Send(req request.Request) (response.Response, error) {
 	reqb := sess.reqpool.Get().(*bytes.Buffer)
 	defer sess.reqpool.Put(reqb)
@@ -185,7 +207,7 @@ func (sess *Session) Send(req request.Request) (response.Response, error) {
 	reqb.Reset()
 	encoder := cbor.NewEncoder(reqb)
 	err := encoder.Encode(req.Encoded())
-	if nil != err {
+	if err != nil {
 		return response.Response{}, err
 	}
 
@@ -198,29 +220,29 @@ func (sess *Session) Send(req request.Request) (response.Response, error) {
 func (sess *Session) sendMarshaled(reqb *bytes.Buffer, resb []byte) (response.Response, error) {
 	res := response.Response{}
 
-	if nil == sess.fd {
-		return res, errors.New("Session is closed")
+	if sess == nil || sess.fd == nil {
+		return res, ErrSessionClosed
 	}
 
 	resb, err := send(sess.options, sess.fd.Fd(), reqb.Bytes(), resb)
-	if nil != err {
+	if err != nil {
 		return res, err
 	}
 
 	err = cbor.Unmarshal(resb, &res)
-	if nil != err {
+	if err != nil {
 		return res, err
 	}
 
 	return res, nil
 }
 
-// Read entropy from the NSM device. It is safe to call this from multiple
-// threads that are Read-ing or Send-ing, but not Close-ing.  This method will
-// always attempt to fill the whole slice with entropy thus blocking until that
-// occurs. If reading fails, it is probably an irrecoverable error.  Each Send
-// and Read call reserves at most 16KB of memory, so having multiple parallel
-// sends or reads might lead to increased memory usage.
+// Read entropy from the NSM device. This method blocks until the entire slice
+// is filled with cryptographically secure random bytes from the NSM.
+// Each GetRandom request is a synchronous IOCTL that context-switches to the
+// Nitro hypervisor, making it expensive. Consider using returned entropy to
+// seed a DRBG rather than calling repeatedly.
+// Safe to call from multiple goroutines, but not while Close-ing.
 func (sess *Session) Read(into []byte) (int, error) {
 	reqb := sess.reqpool.Get().(*bytes.Buffer)
 	defer sess.reqpool.Put(reqb)
@@ -230,27 +252,33 @@ func (sess *Session) Read(into []byte) (int, error) {
 	reqb.Reset()
 	encoder := cbor.NewEncoder(reqb)
 	err := encoder.Encode(getRandom.Encoded())
-	if nil != err {
+	if err != nil {
 		return 0, err
 	}
 
 	resb := sess.respool.Get().([]byte)
 	defer sess.respool.Put(resb)
 
-	for i := 0; i < len(into); i += 0 {
+	for i := 0; i < len(into); {
 		res, err := sess.sendMarshaled(reqb, resb)
 
-		if nil != err {
+		if err != nil {
 			return i, err
 		}
 
-		if "" != res.Error || nil == res.GetRandom || nil == res.GetRandom.Random || 0 == len(res.GetRandom.Random) {
+		if res.Error != "" || res.GetRandom == nil || res.GetRandom.Random == nil || len(res.GetRandom.Random) == 0 {
 			return i, &ErrorGetRandomFailed{
 				ErrorCode: res.Error,
 			}
 		}
 
-		i += copy(into[i:], res.GetRandom.Random)
+		copied := copy(into[i:], res.GetRandom.Random)
+		if copied == 0 {
+			return i, &ErrorGetRandomFailed{
+				ErrorCode: "no data received",
+			}
+		}
+		i += copied
 	}
 
 	return len(into), nil
