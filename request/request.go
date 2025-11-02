@@ -2,6 +2,12 @@
 // payload.
 package request
 
+const (
+	// Request type names
+	nameDescribeNSM = "DescribeNSM"
+	nameGetRandom   = "GetRandom"
+)
+
 // A Request interface.
 type Request interface {
 	// Returns the Go-encoded form of the request, according to Rust's cbor
@@ -69,7 +75,7 @@ type DescribeNSM struct {
 // Encoded returns the Go-encoded form of the request, according to Rust's cbor
 // serde.
 func (r *DescribeNSM) Encoded() interface{} {
-	return "DescribeNSM"
+	return nameDescribeNSM
 }
 
 // An Attestation request.
@@ -94,5 +100,5 @@ type GetRandom struct {
 // Encoded returns the Go-encoded form of the request, according to Rust's cbor
 // serde.
 func (r *GetRandom) Encoded() interface{} {
-	return "GetRandom"
+	return nameGetRandom
 }
