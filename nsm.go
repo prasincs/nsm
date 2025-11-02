@@ -136,6 +136,11 @@ func send(options Options, fd uintptr, req []byte, res []byte) ([]byte, error) {
 		}
 	}
 
+	// Validate response length to prevent buffer overrun
+	if msg.Response.Len > uint64(len(res)) {
+		return nil, fmt.Errorf("response length %d exceeds buffer size %d", msg.Response.Len, len(res))
+	}
+
 	return res[:msg.Response.Len], nil
 }
 
@@ -184,14 +189,17 @@ func (sess *Session) Close() error {
 		return nil
 	}
 
-	err := sess.fd.Close()
-	if err == nil {
-		// Only set to nil if close was successful
+	var err error
+	
+	// Always clear the session state to prevent reuse, even on panic
+	defer func() {
 		sess.fd = nil
 		sess.reqpool = nil
 		sess.respool = nil
-	}
-
+	}()
+	
+	// Close the file descriptor
+	err = sess.fd.Close()
 	return err
 }
 
@@ -201,17 +209,36 @@ func (sess *Session) Close() error {
 // Safe to call from multiple goroutines, but not while Close-ing.
 // Each call reserves up to 16KB of memory.
 func (sess *Session) Send(req request.Request) (response.Response, error) {
-	reqb := sess.reqpool.Get().(*bytes.Buffer)
+	if req == nil {
+		return response.Response{}, fmt.Errorf("request cannot be nil")
+	}
+
+	reqbRaw := sess.reqpool.Get()
+	reqb, ok := reqbRaw.(*bytes.Buffer)
+	if !ok {
+		sess.reqpool.Put(reqbRaw)
+		return response.Response{}, fmt.Errorf("pool returned unexpected type %T", reqbRaw)
+	}
 	defer sess.reqpool.Put(reqb)
 
 	reqb.Reset()
 	encoder := cbor.NewEncoder(reqb)
 	err := encoder.Encode(req.Encoded())
 	if err != nil {
-		return response.Response{}, err
+		return response.Response{}, fmt.Errorf("failed to encode request: %w", err)
 	}
 
-	resb := sess.respool.Get().([]byte)
+	// Validate encoded request size
+	if reqb.Len() > maxRequestSize {
+		return response.Response{}, fmt.Errorf("encoded request size %d exceeds maximum %d", reqb.Len(), maxRequestSize)
+	}
+
+	resbRaw := sess.respool.Get()
+	resb, ok := resbRaw.([]byte)
+	if !ok {
+		sess.respool.Put(resbRaw)
+		return response.Response{}, fmt.Errorf("pool returned unexpected type %T", resbRaw)
+	}
 	defer sess.respool.Put(resb)
 
 	return sess.sendMarshaled(reqb, resb)
@@ -229,9 +256,17 @@ func (sess *Session) sendMarshaled(reqb *bytes.Buffer, resb []byte) (response.Re
 		return res, err
 	}
 
+	// Validate response data before unmarshaling
+	if len(resb) == 0 {
+		return res, fmt.Errorf("empty response from NSM device")
+	}
+	if len(resb) > maxResponseSize {
+		return res, fmt.Errorf("response size %d exceeds maximum %d", len(resb), maxResponseSize)
+	}
+
 	err = cbor.Unmarshal(resb, &res)
 	if err != nil {
-		return res, err
+		return res, fmt.Errorf("failed to unmarshal CBOR response: %w", err)
 	}
 
 	return res, nil
@@ -256,7 +291,12 @@ func (sess *Session) Read(into []byte) (int, error) {
 		return 0, err
 	}
 
-	resb := sess.respool.Get().([]byte)
+	resbRaw := sess.respool.Get()
+	resb, ok := resbRaw.([]byte)
+	if !ok {
+		sess.respool.Put(resbRaw)
+		return 0, fmt.Errorf("pool returned unexpected type %T", resbRaw)
+	}
 	defer sess.respool.Put(resb)
 
 	for i := 0; i < len(into); {

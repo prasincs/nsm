@@ -70,11 +70,10 @@ import (
 
 func generateBigPrime() (*big.Int, error) {
     sess, err := nsm.OpenDefaultSession()
-    defer sess.Close()
-
-    if nil != err {
+    if err != nil {
         return nil, err
     }
+    defer sess.Close()
 
     return rand.Prime(sess, 2048)
 }
@@ -94,26 +93,25 @@ import (
 
 func attest(nonce, userData, publicKey []byte) ([]byte, error) {
     sess, err := nsm.OpenDefaultSession()
-    defer sess.Close()
-
-    if nil != err {
+    if err != nil {
         return nil, err
     }
+    defer sess.Close()
 
     res, err := sess.Send(&request.Attestation{
         Nonce: nonce,
         UserData: userData,
         PublicKey: publicKey,
     })
-    if nil != err {
+    if err != nil {
         return nil, err
     }
 
-    if "" != res.Error {
+    if res.Error != "" {
         return nil, errors.New(string(res.Error))
     }
 
-    if nil == res.Attestation || nil == res.Attestation.Document {
+    if res.Attestation == nil || res.Attestation.Document == nil {
         return nil, errors.New("NSM device did not return an attestation")
     }
 
