@@ -8,6 +8,7 @@ import (
 	"syscall"
 	"testing"
 
+	"github.com/fxamacker/cbor/v2"
 	"github.com/hf/nsm/request"
 )
 
@@ -109,6 +110,24 @@ func TestOpenSessionErrorHandling(t *testing.T) {
 		}
 		if sess.fd == nil {
 			t.Error("expected non-nil file descriptor")
+		}
+	})
+
+	t.Run("default session uses default options", func(t *testing.T) {
+		// Mock the default open to avoid accessing /dev/nsm
+		originalOpen := DefaultOptions.Open
+		defer func() { DefaultOptions.Open = originalOpen }()
+		
+		DefaultOptions.Open = func() (FileDescriptor, error) {
+			return &mockFileDescriptor{fd: 1}, nil
+		}
+
+		sess, err := OpenDefaultSession()
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+		if sess == nil {
+			t.Error("expected non-nil session")
 		}
 	})
 }
@@ -348,4 +367,102 @@ func TestRequestSizeValidation(t *testing.T) {
 	}
 	// The exact error depends on CBOR encoding, but should contain size information
 	t.Logf("Got expected error for large request: %v", err)
+}
+
+// TestSendMarshaledValidation tests sendMarshaled function
+func TestSendMarshaledValidation(t *testing.T) {
+	t.Run("empty response validation", func(t *testing.T) {
+		sess := &Session{
+			fd: &mockFileDescriptor{fd: 1},
+			options: Options{
+				Syscall: func(trap, a1, a2, a3 uintptr) (r1, r2 uintptr, err syscall.Errno) {
+					return 0, 0, 0 // Empty response
+				},
+			},
+		}
+
+		reqb := bytes.NewBufferString("test")
+		resb := make([]byte, 0) // Empty response buffer from send()
+
+		_, err := sess.sendMarshaled(reqb, resb)
+		if err == nil {
+			t.Error("expected error for empty response")
+		}
+		// The actual error depends on which validation catches it first
+	})
+
+	t.Run("CBOR unmarshal error", func(t *testing.T) {
+		sess := &Session{
+			fd: &mockFileDescriptor{fd: 1},
+			options: Options{
+				Syscall: func(trap, a1, a2, a3 uintptr) (r1, r2 uintptr, err syscall.Errno) {
+					return 0, 0, 0
+				},
+			},
+		}
+
+		reqb := bytes.NewBufferString("test")
+		resb := []byte{0xFF, 0xFF, 0xFF} // Invalid CBOR
+
+		_, err := sess.sendMarshaled(reqb, resb)
+		if err == nil {
+			t.Error("expected error for invalid CBOR")
+		}
+		if err.Error() == "" {
+			t.Error("error message should not be empty")
+		}
+		t.Logf("Got expected CBOR error: %v", err)
+	})
+}
+
+// TestSendSuccessPath tests successful send operation
+func TestSendSuccessPath(t *testing.T) {
+	// Create a valid CBOR response for DescribeNSM
+	validResponse := map[string]interface{}{
+		"DescribeNSM": map[string]interface{}{
+			"version_major": uint16(1),
+			"version_minor": uint16(0),
+			"module_id":     "test-module",
+		},
+	}
+	
+	validCBOR, err := cbor.Marshal(validResponse)
+	if err != nil {
+		t.Fatalf("failed to create test response: %v", err)
+	}
+
+	sess := &Session{
+		fd: &mockFileDescriptor{fd: 1},
+		options: Options{
+			Syscall: func(trap, a1, a2, a3 uintptr) (r1, r2 uintptr, err syscall.Errno) {
+				// Simulate successful syscall that copies response data
+				return 0, 0, 0
+			},
+		},
+		reqpool: &sync.Pool{
+			New: func() any {
+				return bytes.NewBuffer(make([]byte, 0, maxRequestSize))
+			},
+		},
+		respool: &sync.Pool{
+			New: func() any {
+				// Return buffer with valid CBOR data
+				buf := make([]byte, maxResponseSize)
+				copy(buf, validCBOR)
+				return buf
+			},
+		},
+	}
+
+	// Test sendMarshaled directly with valid CBOR
+	reqb := bytes.NewBufferString("test")
+
+	response, err := sess.sendMarshaled(reqb, validCBOR)
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+
+	if response.DescribeNSM == nil {
+		t.Error("expected DescribeNSM response")
+	}
 }
