@@ -164,12 +164,12 @@ func OpenSession(opts Options) (*Session, error) {
 		fd:      fd,
 	}
 	session.reqpool = &sync.Pool{
-		New: func() interface{} {
+		New: func() any {
 			return bytes.NewBuffer(make([]byte, 0, maxRequestSize))
 		},
 	}
 	session.respool = &sync.Pool{
-		New: func() interface{} {
+		New: func() any {
 			return make([]byte, maxResponseSize)
 		},
 	}
@@ -211,6 +211,10 @@ func (sess *Session) Close() error {
 func (sess *Session) Send(req request.Request) (response.Response, error) {
 	if req == nil {
 		return response.Response{}, fmt.Errorf("request cannot be nil")
+	}
+
+	if sess == nil || sess.fd == nil || sess.reqpool == nil || sess.respool == nil {
+		return response.Response{}, ErrSessionClosed
 	}
 
 	reqbRaw := sess.reqpool.Get()
@@ -279,7 +283,16 @@ func (sess *Session) sendMarshaled(reqb *bytes.Buffer, resb []byte) (response.Re
 // seed a DRBG rather than calling repeatedly.
 // Safe to call from multiple goroutines, but not while Close-ing.
 func (sess *Session) Read(into []byte) (int, error) {
-	reqb := sess.reqpool.Get().(*bytes.Buffer)
+	if sess == nil || sess.fd == nil || sess.reqpool == nil || sess.respool == nil {
+		return 0, ErrSessionClosed
+	}
+
+	reqbRaw := sess.reqpool.Get()
+	reqb, ok := reqbRaw.(*bytes.Buffer)
+	if !ok {
+		sess.reqpool.Put(reqbRaw)
+		return 0, fmt.Errorf("pool returned unexpected type %T", reqbRaw)
+	}
 	defer sess.reqpool.Put(reqb)
 
 	getRandom := request.GetRandom{}
